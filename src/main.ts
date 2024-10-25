@@ -10,7 +10,7 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('Colavo Salon')
-    .setDescription('콜라보살롱 예약시스템을 마킹한 과제입니다')
+    .setDescription('콜라보살롱 예약시스템을 모킹한 과제입니다')
     .setVersion('1.0')
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }) // JWT 사용을 위한 설정
     .build();
@@ -22,7 +22,6 @@ async function bootstrap() {
       operationsSorter: 'alpha', // API 그룹 내 정렬을 알파벳 순으로
     },
   });
-
   await app.listen(port, function () {
     console.log(`서버가 ${port}번 에서 실행중입니다`);
   });
