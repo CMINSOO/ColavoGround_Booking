@@ -1,6 +1,6 @@
 import { IsBoolean, IsNumber, IsOptional, IsString } from 'class-validator';
 
-export class GetTimeSlotsDto {
+export class CreateDateTimeTableDto {
   @IsString()
   start_day_identifier: string;
 
