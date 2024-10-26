@@ -4,7 +4,7 @@ import { CreateDateTimeTableDto } from './dtos/getTimeSlots.dto';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import { Timeslot } from './interfaces/interfaces';
+import { Event, Timeslot } from './interfaces/interfaces';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -62,6 +62,8 @@ export class TimetableService {
         timezone_identifier,
         timeslot_interval,
         service_duration,
+        events,
+        is_ignore_schedule,
       );
 
       return {
@@ -117,6 +119,8 @@ export class TimetableService {
     timezone: string,
     timeslot_interval: number,
     service_duration: number,
+    events: Event[],
+    is_ignore_schedule: boolean,
   ): Timeslot[] {
     const timeslots: Timeslot[] = [];
     const startDay = dayjs.tz(date, timezone).startOf('day');
@@ -128,10 +132,13 @@ export class TimetableService {
 
       // 하루를 넘지 않을 때만 타임슬롯 추가
       if (currentEndTime.diff(startDay, 'second') <= 86400) {
-        timeslots.push({
+        const timeslot = {
           begin_at: currentTime.unix(),
           end_at: currentEndTime.unix(),
-        });
+        };
+        if (is_ignore_schedule || !this.isDuplicateEvents(timeslot, events)) {
+          timeslots.push(timeslot);
+        }
       }
 
       // 시작 시간을 다음 타임슬롯으로 이동
@@ -139,5 +146,14 @@ export class TimetableService {
     }
 
     return timeslots;
+  }
+
+  isDuplicateEvents(timeslot: Timeslot, events: Event[]): boolean {
+    return events.some(
+      (event) =>
+        !(
+          timeslot.end_at <= event.begin_at || timeslot.begin_at >= event.end_at
+        ),
+    );
   }
 }
