@@ -4,7 +4,7 @@ import { CreateDateTimeTableDto } from './dtos/getTimeSlots.dto';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import { Event, Timeslot } from './interfaces/interfaces';
+import { Event, Timeslot, Workhour } from './interfaces/interfaces';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -30,17 +30,18 @@ export class TimetableService {
     const workHours = await this.jsonLoader.getWorkHours();
     const events = await this.jsonLoader.getEvents();
 
-    // start_day_identifier 변환 및 유닉스 타임 계산
+    //start_day_identifier 변환 및 유닉스 타임 계산
     const formattedStartDay = this.formatStartDay(start_day_identifier);
     console.log('형식에 맞게 변환한 시작날짜', formattedStartDay);
 
-    // 형식에 맞게 반환한 날짜를 유닉스 시간으로 변경
+    //형식에 맞게 반환한 날짜를 유닉스 시간으로 변경
     const unixStartDay = this.calculateUnixTime(formattedStartDay);
     console.log('시작날짜를 유닉스시간대로 변환:', unixStartDay);
 
     const startDay = dayjs
       .tz(formattedStartDay, timezone_identifier)
       .startOf('day');
+    console.log('startDay:', startDay);
 
     //유닉스 타임에서 국가시간에 맞게 요일구하기
     const day = await this.getDayFromUnixTime(
@@ -50,13 +51,17 @@ export class TimetableService {
     console.log('국가별 요일:', day);
 
     //들어온 days값에 맞게 날짜에 대한 테이블 생성하기
-    // days 값이 음수로 들어올때 오류가 발생해서 Math.abs를 통해 절대값으로 변환
+    //days 값이 음수로 들어올때 오류가 발생해서 Math.abs를 통해 절대값으로 변환
+    //TODO: 이것도 따로 리팩토링할수 있을듯
     const dayTimetable = Array.from({ length: Math.abs(days) + 1 }, (_, i) => {
       const offset = days < 0 ? -i : i; // days가 음수일 경우 날짜를 과거로 이동
       const currentDay = startDay.add(offset, 'day'); // offset일 후의 날짜
+      console.log('currentDay:', currentDay);
       const unixStartOfDay = currentDay.unix();
+      const weekday = currentDay.day();
+      console.log('weekday', weekday);
 
-      // 날짜별로 타임슬롯 만들어주기
+      //날짜별로 타임슬롯 만들어주기
       const timeslots = this.createTimeSlot(
         currentDay.format('YYYY-MM-DD'),
         timezone_identifier,
@@ -64,6 +69,9 @@ export class TimetableService {
         service_duration,
         events,
         is_ignore_schedule,
+        workHours,
+        is_ignore_workhour,
+        weekday,
       );
 
       return {
@@ -76,7 +84,7 @@ export class TimetableService {
     return dayTimetable;
   }
 
-  // YYYYMMDD 형식을 YYYY-MM-DD로 변환하는 함수
+  //YYYYMMDD 형식을 YYYY-MM-DD로 변환하는 함수
   formatStartDay(input: string): string {
     if (input.length !== 8 || !/^\d{8}$/.test(input)) {
       throw new BadRequestException('올바르지 않은 날짜 형식입니다');
@@ -95,10 +103,13 @@ export class TimetableService {
   }
 
   //유닉스타임을 날짜로 변환한후 요일을 구하는 함수
-  // day-off인날은 아무것도 반환하지 않기위해
+  //day-off인날은 아무것도 반환하지 않기위해
   getDayFromUnixTime(unixTime: number, tz: string) {
+    //TODO: 이미 unixtime 형식으로 넘겨받았는데 다시 할 필요가 있을까? 일단 우선순위 아래
     const date = dayjs.unix(unixTime).tz(tz);
+    console.log('@@@@date:', date);
     const day = date.format('ddd');
+    console.log('####', day);
     //요일을 숫자키값으로 변경
     const dayValues = {
       Sun: 1,
@@ -109,11 +120,13 @@ export class TimetableService {
       Fri: 6,
       Sat: 7,
     };
+    console.log('요일키값:', dayValues[day]);
     return dayValues[day];
   }
 
   //TODO: while문 말고 개선할수있는 방법이 있는지 찾아봐야할듯
   //TimeSlot만들어주는 함숭
+  //TODO: 이거 파라미터도 DTO로 빼주면 더 깔끔할듯?
   createTimeSlot(
     date: string,
     timezone: string,
@@ -121,17 +134,34 @@ export class TimetableService {
     service_duration: number,
     events: Event[],
     is_ignore_schedule: boolean,
+    workHours: Workhour[],
+    is_ignore_workhour: boolean,
+    weekday: number,
   ): Timeslot[] {
     const timeslots: Timeslot[] = [];
-    const startDay = dayjs.tz(date, timezone).startOf('day');
 
-    let currentTime = startDay;
+    const startDay = dayjs.tz(date, timezone).startOf('day');
+    console.log('TL StartDay:', startDay);
+
+    const workhour = workHours.find((e) => e.weekday === weekday);
+    console.log('workhour:', workhour);
+
+    let openTime = 0;
+    let closeTime = 86400; //초 단위로 계산한 하루
+
+    if (!is_ignore_workhour && workhour && !workhour.is_day_off) {
+      openTime = workhour.open_interval;
+      closeTime = workhour.close_interval;
+    }
+
+    let currentTime = startDay.add(openTime, 'second');
+
     //하루 전체시간은 = 86400초. 해당 초 안의 범위에서만 슬롯생성하기
-    while (currentTime.diff(startDay, 'second') < 86400) {
+    while (currentTime.diff(startDay, 'second') < closeTime) {
       const currentEndTime = currentTime.add(service_duration, 'second');
 
       // 하루를 넘지 않을 때만 타임슬롯 추가
-      if (currentEndTime.diff(startDay, 'second') <= 86400) {
+      if (currentEndTime.diff(startDay, 'second') <= closeTime) {
         const timeslot = {
           begin_at: currentTime.unix(),
           end_at: currentEndTime.unix(),
@@ -148,6 +178,7 @@ export class TimetableService {
     return timeslots;
   }
 
+  //걉치는 이벤트가 있는지 확인
   isDuplicateEvents(timeslot: Timeslot, events: Event[]): boolean {
     return events.some(
       (event) =>
