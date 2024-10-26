@@ -25,6 +25,7 @@ export class TimetableService {
     } = createDateTimeTableDto;
 
     console.log('시간대 :', timezone_identifier);
+
     //json파일 읽어온것
     const workHours = await this.jsonLoader.getWorkHours();
     const events = await this.jsonLoader.getEvents();
@@ -32,6 +33,7 @@ export class TimetableService {
     // start_day_identifier 변환 및 유닉스 타임 계산
     const formattedStartDay = this.formatStartDay(start_day_identifier);
     console.log('형식에 맞게 변환한 시작날짜', formattedStartDay);
+
     // 형식에 맞게 반환한 날짜를 유닉스 시간으로 변경
     const unixStartDay = this.calculateUnixTime(formattedStartDay);
     console.log('시작날짜를 유닉스시간대로 변환:', unixStartDay);
@@ -53,12 +55,15 @@ export class TimetableService {
       const offset = days < 0 ? -i : i; // days가 음수일 경우 날짜를 과거로 이동
       const currentDay = startDay.add(offset, 'day'); // offset일 후의 날짜
       const unixStartOfDay = currentDay.unix();
+
       // 날짜별로 타임슬롯 만들어주기
       const timeslots = this.createTimeSlot(
         currentDay.format('YYYY-MM-DD'),
         timezone_identifier,
         timeslot_interval,
+        service_duration,
       );
+
       return {
         start_of_day: unixStartOfDay,
         day_modifier: offset,
@@ -111,6 +116,7 @@ export class TimetableService {
     date: string,
     timezone: string,
     timeslot_interval: number,
+    service_duration: number,
   ): Timeslot[] {
     const timeslots: Timeslot[] = [];
     const startDay = dayjs.tz(date, timezone).startOf('day');
@@ -118,7 +124,7 @@ export class TimetableService {
     let currentTime = startDay;
     //하루 전체시간은 = 86400초. 해당 초 안의 범위에서만 슬롯생성하기
     while (currentTime.diff(startDay, 'second') < 86400) {
-      const currentEndTime = currentTime.add(timeslot_interval, 'second');
+      const currentEndTime = currentTime.add(service_duration, 'second');
 
       // 하루를 넘지 않을 때만 타임슬롯 추가
       if (currentEndTime.diff(startDay, 'second') <= 86400) {
@@ -129,7 +135,7 @@ export class TimetableService {
       }
 
       // 시작 시간을 다음 타임슬롯으로 이동
-      currentTime = currentEndTime;
+      currentTime = currentTime.add(timeslot_interval, 'second');
     }
 
     return timeslots;
