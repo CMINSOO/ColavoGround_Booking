@@ -8,7 +8,7 @@
   },
   {
     "close_interval": 36900,
-    "is_day_off": false,
+    "is_day_off": true,
     "key": "mon",
     "open_interval": 36900,
     "weekday": 2
