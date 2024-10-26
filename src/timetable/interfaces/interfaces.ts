@@ -9,3 +9,8 @@ export interface DayTimetable {
   is_day_off: boolean;
   timeslots: Timeslot[];
 }
+
+export interface Event {
+  begin_at: number;
+  end_at: number;
+}
