@@ -1,10 +1,16 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { JsonLoaderService } from './json-loader.service';
-import { CreateDateTimeTableDto } from './dtos/getTimeSlots.dto';
+import { CreateDateTimeTableDto } from './dtos/create-date-time-table.dto.ts';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import { Event, Timeslot, Workhour } from './interfaces/interfaces';
+import {
+  DayTimetable,
+  Event,
+  Timeslot,
+  Workhour,
+} from './interfaces/interfaces';
+import { GenerateDayTimetableDto } from './dtos/generate-date-time-table.dto';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -24,12 +30,19 @@ export class TimetableService {
       is_ignore_workhour,
     } = createDateTimeTableDto;
 
+    console.log('^^^^^^^^', createDateTimeTableDto);
     console.log('시간대 :', timezone_identifier);
 
     //json파일 읽어온것
     const workHours = await this.jsonLoader.getWorkHours();
     const events = await this.jsonLoader.getEvents();
 
+    console.log('1111111', workHours);
+    console.log('2222222', events);
+    console.log('33333', days);
+    console.log('444444', is_ignore_schedule);
+    console.log('5555555', is_ignore_workhour);
+    console.log('666666', timeslot_interval);
     //start_day_identifier 변환 및 유닉스 타임 계산
     const formattedStartDay = this.formatStartDay(start_day_identifier);
     console.log('형식에 맞게 변환한 시작날짜', formattedStartDay);
@@ -52,18 +65,12 @@ export class TimetableService {
 
     //들어온 days값에 맞게 날짜에 대한 테이블 생성하기
     //days 값이 음수로 들어올때 오류가 발생해서 Math.abs를 통해 절대값으로 변환
-    //TODO: 이것도 따로 리팩토링할수 있을듯
     const dayTimetable = Array.from({ length: Math.abs(days) + 1 }, (_, i) => {
       const offset = days < 0 ? -i : i; // days가 음수일 경우 날짜를 과거로 이동
-      const currentDay = startDay.add(offset, 'day'); // offset일 후의 날짜
-      console.log('currentDay:', currentDay);
-      const unixStartOfDay = currentDay.unix();
-      const weekday = currentDay.day();
-      console.log('weekday', weekday);
 
-      //날짜별로 타임슬롯 만들어주기
-      const timeslots = this.createTimeSlot(
-        currentDay.format('YYYY-MM-DD'),
+      const generateDayTimetableDto: GenerateDayTimetableDto = {
+        offset,
+        startDay: formattedStartDay,
         timezone_identifier,
         timeslot_interval,
         service_duration,
@@ -71,15 +78,9 @@ export class TimetableService {
         is_ignore_schedule,
         workHours,
         is_ignore_workhour,
-        weekday,
-      );
-
-      return {
-        start_of_day: unixStartOfDay,
-        day_modifier: offset,
-        is_day_off: false,
-        timeslots,
       };
+
+      return this.generateDateTimetable(generateDayTimetableDto);
     });
     return dayTimetable;
   }
@@ -143,18 +144,29 @@ export class TimetableService {
     const startDay = dayjs.tz(date, timezone).startOf('day');
     console.log('TL StartDay:', startDay);
 
-    const workhour = workHours.find((e) => e.weekday === weekday);
+    console.log('넘어오는지 확인', workHours);
+    const workhour = workHours.find((e) => {
+      console.log(weekday, '-----', e.weekday, '-----', e.weekday === weekday);
+      return e.weekday === weekday;
+    });
     console.log('workhour:', workhour);
 
     let openTime = 0;
     let closeTime = 86400; //초 단위로 계산한 하루
 
+    console.log(
+      '이게 문제인듯',
+      !is_ignore_workhour && workhour && !workhour.is_day_off,
+    );
     if (!is_ignore_workhour && workhour && !workhour.is_day_off) {
       openTime = workhour.open_interval;
+      console.log('@#@#@#@#@', openTime);
       closeTime = workhour.close_interval;
     }
 
     let currentTime = startDay.add(openTime, 'second');
+
+    console.log('!@%!@%!@%!@%!@%!@%!@%시작시간', currentTime);
 
     //하루 전체시간은 = 86400초. 해당 초 안의 범위에서만 슬롯생성하기
     while (currentTime.diff(startDay, 'second') < closeTime) {
@@ -166,25 +178,81 @@ export class TimetableService {
           begin_at: currentTime.unix(),
           end_at: currentEndTime.unix(),
         };
-        if (is_ignore_schedule || !this.isDuplicateEvents(timeslot, events)) {
+        console.log('찐텐 시작시간@@@@2', timeslot.begin_at);
+        if (
+          is_ignore_schedule ||
+          (!is_ignore_schedule && !this.isDuplicateEvents(timeslot, events))
+        ) {
           timeslots.push(timeslot);
+          console.log('첫시작시간', timeslots[0]);
         }
       }
 
       // 시작 시간을 다음 타임슬롯으로 이동
       currentTime = currentTime.add(timeslot_interval, 'second');
     }
-
+    console.log('진짜로 반환되는 타임슬롯', timeslots);
     return timeslots;
   }
 
   //걉치는 이벤트가 있는지 확인
   isDuplicateEvents(timeslot: Timeslot, events: Event[]): boolean {
+    // 이벤트가 겹치는 경우의 수
+    // 1. 타임슬롯의 시작이 이벤트의 범위 내에 있는 경우
+    // 2. 타임슬롯의 끝이 이벤트의 범위 내에 있는 경우
+    // 3. 이벤트의 시작이 타임슬롯의 범위 내에 있는 경우
+    // 4. 이벤트의 끝이 타임슬롯의 범위 내에 있는 경우
     return events.some(
       (event) =>
-        !(
-          timeslot.end_at <= event.begin_at || timeslot.begin_at >= event.end_at
-        ),
+        (timeslot.begin_at >= event.begin_at &&
+          timeslot.begin_at < event.end_at) ||
+        (timeslot.end_at > event.begin_at && timeslot.end_at <= event.end_at) ||
+        (event.begin_at >= timeslot.begin_at &&
+          event.begin_at < timeslot.end_at) ||
+        (event.end_at > timeslot.begin_at && event.end_at <= timeslot.end_at),
     );
+  }
+
+  generateDateTimetable(
+    generateDateTimetableDto: GenerateDayTimetableDto,
+  ): DayTimetable {
+    const {
+      offset,
+      startDay,
+      timezone_identifier,
+      timeslot_interval,
+      service_duration,
+      events,
+      is_ignore_schedule,
+      workHours,
+      is_ignore_workhour,
+    } = generateDateTimetableDto;
+
+    const convertedStartDay = dayjs
+      .tz(startDay, timezone_identifier)
+      .startOf('day'); // 새로운 변수명 사용
+    const currentDay = convertedStartDay.add(offset, 'day');
+    const unixStartDay = currentDay.unix();
+    const weekday = this.getDayFromUnixTime(unixStartDay, timezone_identifier);
+    //const weekday = currentDay.day();
+
+    const timeslots = this.createTimeSlot(
+      currentDay.format('YYYY-MM-DD'),
+      timezone_identifier,
+      timeslot_interval,
+      service_duration,
+      events,
+      is_ignore_schedule,
+      workHours,
+      is_ignore_workhour,
+      weekday,
+    );
+
+    return {
+      start_of_day: unixStartDay,
+      day_modifier: offset,
+      is_day_off: false,
+      timeslots,
+    };
   }
 }
