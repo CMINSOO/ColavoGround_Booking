@@ -10,7 +10,6 @@ export class TimetableController {
   async getTimeSlots(@Body() createDateTimeTable: CreateDateTimeTableDto) {
     const data =
       await this.timetableService.createDayTimeTable(createDateTimeTable);
-    console.log('컨트롤러 데이타@@@@@@', data[0].timeslots);
     return data;
   }
 }
