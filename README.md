@@ -4,7 +4,7 @@
 
 ```
 $ git clone https://github.com/Helpme0723/back-end.git
-$ npm i
+$ npm install
 ```
 
 **create**
