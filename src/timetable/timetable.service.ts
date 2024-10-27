@@ -20,7 +20,9 @@ dayjs.extend(timezone);
 @Injectable()
 export class TimetableService {
   constructor(private readonly jsonLoader: JsonLoaderService) {}
-  async createDayTimeTable(createDateTimeTableDto: CreateDateTimeTableDto) {
+  async createDayTimeTable(
+    createDateTimeTableDto: CreateDateTimeTableDto,
+  ): Promise<DayTimetable[]> {
     const {
       startDayIdentifier,
       timezoneIdentifier,
