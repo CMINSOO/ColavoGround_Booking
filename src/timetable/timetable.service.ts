@@ -7,10 +7,12 @@ import timezone from 'dayjs/plugin/timezone';
 import {
   DayTimetable,
   Event,
+  ParametersToCreateTimeslot,
+  ParametersToGenerateTimetable,
   Timeslot,
   Workhour,
 } from './interfaces/interfaces';
-import { GenerateDayTimetableDto } from './dtos/generate-date-time-table.dto';
+import { CLOSE_TIME, OPEN_TIME } from 'src/constants/time.constant';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -20,13 +22,13 @@ export class TimetableService {
   constructor(private readonly jsonLoader: JsonLoaderService) {}
   async createDayTimeTable(createDateTimeTableDto: CreateDateTimeTableDto) {
     const {
-      start_day_identifier,
-      timezone_identifier,
+      startDayIdentifier,
+      timezoneIdentifier,
       days,
-      service_duration,
-      timeslot_interval,
-      is_ignore_schedule,
-      is_ignore_workhour,
+      serviceDuration,
+      timeslotInterval,
+      isIgnoreSchedule,
+      isIgnoreWorkhour,
     } = createDateTimeTableDto;
 
     //json파일 읽어온것
@@ -34,26 +36,26 @@ export class TimetableService {
     const events = await this.jsonLoader.getEvents();
 
     //start_day_identifier 변환 및 유닉스 타임 계산
-    const formattedStartDay = this.formatStartDay(start_day_identifier);
+    const formattedStartDay = this.formatStartDay(startDayIdentifier);
 
     //들어온 days값에 맞게 날짜에 대한 테이블 생성하기
     //days 값이 음수로 들어올때 오류가 발생해서 Math.abs를 통해 절대값으로 변환
     const dayTimetable = Array.from({ length: Math.abs(days) + 1 }, (_, i) => {
       const offset = days < 0 ? -i : i; // days가 음수일 경우 날짜를 과거로 이동
 
-      const generateDayTimetableDto: GenerateDayTimetableDto = {
+      const parametersToGenerateTimetable: ParametersToGenerateTimetable = {
         offset,
         startDay: formattedStartDay,
-        timezone_identifier,
-        timeslot_interval,
-        service_duration,
+        timezoneIdentifier,
+        timeslotInterval,
+        serviceDuration,
         events,
-        is_ignore_schedule,
+        isIgnoreSchedule,
         workHours,
-        is_ignore_workhour,
+        isIgnoreWorkhour,
       };
 
-      return this.generateDateTimetable(generateDayTimetableDto);
+      return this.generateDateTimetable(parametersToGenerateTimetable);
     });
     return dayTimetable;
   }
@@ -90,57 +92,61 @@ export class TimetableService {
     return dayValues[day];
   }
 
-  //TODO: while문 말고 개선할수있는 방법이 있는지 찾아봐야할듯
   //TimeSlot만들어주는 함숭
-  createTimeSlot(
-    date: string,
-    timezone: string,
-    timeslot_interval: number,
-    service_duration: number,
-    events: Event[],
-    is_ignore_schedule: boolean,
-    workHours: Workhour[],
-    is_ignore_workhour: boolean,
-    weekday: number,
-  ): Timeslot[] {
+  createTimeSlot(params: ParametersToCreateTimeslot): Timeslot[] {
+    const {
+      currentDay,
+      timezoneIdentifier,
+      timeslotInterval,
+      serviceDuration,
+      events,
+      isIgnoreSchedule,
+      workHours,
+      isIgnoreWorkHour,
+      weekday,
+    } = params;
     const timeslots: Timeslot[] = [];
-
-    const startDay = dayjs.tz(date, timezone).startOf('day');
-
-    const workhour = workHours.find((e) => {
+    const startDay = dayjs.tz(currentDay, timezoneIdentifier).startOf('day');
+    const workHour = workHours.find((e) => {
       return e.weekday === weekday;
     });
+    let openTime = OPEN_TIME;
+    let closeTime = CLOSE_TIME;
 
-    let openTime = 0;
-    let closeTime = 86400; //초 단위로 계산한 하루
-
-    if (!is_ignore_workhour && workhour && !workhour.is_day_off) {
-      openTime = workhour.open_interval;
-      closeTime = workhour.close_interval;
+    // 영업시간무시 false 일때의 영업시간
+    if (!isIgnoreWorkHour && workHour && !workHour.is_day_off) {
+      openTime = workHour.open_interval;
+      closeTime = workHour.close_interval;
+    }
+    // dayoff 가 true일때의 영업시간
+    if (workHour.is_day_off == true) {
+      openTime = workHour.open_interval;
+      closeTime = workHour.close_interval;
     }
 
     let currentTime = startDay.add(openTime, 'second');
 
-    //하루 전체시간은 = 86400초. 해당 초 안의 범위에서만 슬롯생성하기
+    // 하루 전체시간은 = 86400초. 해당 초 안의 범위에서만 슬롯생성하기
     while (currentTime.diff(startDay, 'second') < closeTime) {
-      const currentEndTime = currentTime.add(service_duration, 'second');
+      const currentEndTime = currentTime.add(serviceDuration, 'second');
 
       // 하루를 넘지 않을 때만 타임슬롯 추가
       if (currentEndTime.diff(startDay, 'second') <= closeTime) {
-        const timeslot = {
-          begin_at: currentTime.unix(),
-          end_at: currentEndTime.unix(),
+        const createdTimeslot = {
+          beginAt: currentTime.unix(),
+          endAt: currentEndTime.unix(),
         };
         if (
-          is_ignore_schedule ||
-          (!is_ignore_schedule && !this.isDuplicateEvents(timeslot, events))
+          isIgnoreSchedule ||
+          (!isIgnoreSchedule &&
+            !this.isDuplicateEvents(createdTimeslot, events))
         ) {
-          timeslots.push(timeslot);
+          timeslots.push(createdTimeslot);
         }
       }
 
       // 시작 시간을 다음 타임슬롯으로 이동
-      currentTime = currentTime.add(timeslot_interval, 'second');
+      currentTime = currentTime.add(timeslotInterval, 'second');
     }
     return timeslots;
   }
@@ -154,54 +160,57 @@ export class TimetableService {
     // 4. 이벤트의 끝이 타임슬롯의 범위 내에 있는 경우
     return events.some(
       (event) =>
-        (timeslot.begin_at >= event.begin_at &&
-          timeslot.begin_at < event.end_at) ||
-        (timeslot.end_at > event.begin_at && timeslot.end_at <= event.end_at) ||
-        (event.begin_at >= timeslot.begin_at &&
-          event.begin_at < timeslot.end_at) ||
-        (event.end_at > timeslot.begin_at && event.end_at <= timeslot.end_at),
+        (timeslot.beginAt >= event.begin_at &&
+          timeslot.beginAt < event.end_at) ||
+        (timeslot.endAt > event.begin_at && timeslot.endAt <= event.end_at) ||
+        (event.begin_at >= timeslot.beginAt &&
+          event.begin_at < timeslot.endAt) ||
+        (event.end_at > timeslot.beginAt && event.end_at <= timeslot.endAt),
     );
   }
 
-  generateDateTimetable(
-    generateDateTimetableDto: GenerateDayTimetableDto,
-  ): DayTimetable {
+  generateDateTimetable(params: ParametersToGenerateTimetable): DayTimetable {
     const {
       offset,
       startDay,
-      timezone_identifier,
-      timeslot_interval,
-      service_duration,
+      timezoneIdentifier,
+      timeslotInterval,
+      serviceDuration,
       events,
-      is_ignore_schedule,
+      isIgnoreSchedule,
       workHours,
-      is_ignore_workhour,
-    } = generateDateTimetableDto;
+      isIgnoreWorkhour,
+    } = params;
 
     const convertedStartDay = dayjs
-      .tz(startDay, timezone_identifier)
-      .startOf('day'); // 새로운 변수명 사용
+      .tz(startDay, timezoneIdentifier)
+      .startOf('day');
     const currentDay = convertedStartDay.add(offset, 'day');
     const unixStartDay = currentDay.unix();
-    const weekday = this.getDayFromUnixTime(unixStartDay, timezone_identifier);
-
-    const timeslots = this.createTimeSlot(
-      currentDay.format('YYYY-MM-DD'),
-      timezone_identifier,
-      timeslot_interval,
-      service_duration,
-      events,
-      is_ignore_schedule,
-      workHours,
-      is_ignore_workhour,
-      weekday,
-    );
-
+    const weekday = this.getDayFromUnixTime(unixStartDay, timezoneIdentifier);
+    const parametersToCreateTimeslot: ParametersToCreateTimeslot = {
+      currentDay: currentDay.format('YYYY-MM-DD'),
+      timezoneIdentifier: timezoneIdentifier,
+      timeslotInterval: timeslotInterval,
+      serviceDuration: serviceDuration,
+      events: events,
+      isIgnoreSchedule: isIgnoreSchedule,
+      workHours: workHours,
+      isIgnoreWorkHour: isIgnoreWorkhour,
+      weekday: weekday,
+    };
+    const timeslots = this.createTimeSlot(parametersToCreateTimeslot);
+    const isOff = this.getIsDayOff(workHours, weekday);
     return {
-      start_of_day: unixStartDay,
-      day_modifier: offset,
-      is_day_off: false,
+      startOfDay: unixStartDay,
+      dayModifier: offset,
+      isDayOff: isOff,
       timeslots,
     };
+  }
+
+  getIsDayOff(workHour: Workhour[], weekday: number): boolean {
+    const currentDayObject = workHour.find((e) => e.weekday == weekday);
+    return currentDayObject.is_day_off;
   }
 }

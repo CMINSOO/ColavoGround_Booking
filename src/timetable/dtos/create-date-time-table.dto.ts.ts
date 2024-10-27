@@ -10,15 +10,15 @@ import {
 export class CreateDateTimeTableDto {
   @IsNotEmpty()
   @IsString()
-  start_day_identifier: string;
+  startDayIdentifier: string;
 
   @IsNotEmpty()
   @IsString()
-  timezone_identifier: string;
+  timezoneIdentifier: string;
 
   @IsNotEmpty()
   @IsNumber()
-  service_duration: number;
+  serviceDuration: number;
 
   @IsOptional()
   @IsNumber()
@@ -26,15 +26,15 @@ export class CreateDateTimeTableDto {
 
   @IsOptional()
   @IsNumber()
-  timeslot_interval: number = 1800;
+  timeslotInterval: number = 1800;
 
   @IsOptional()
   @IsBoolean()
   @Transform(({ value }) => [true, 'true'].includes(value))
-  is_ignore_schedule: boolean = false;
+  isIgnoreSchedule: boolean = false;
 
   @IsOptional()
   @IsBoolean()
   @Transform(({ value }) => [true, 'true'].includes(value))
-  is_ignore_workhour: boolean = false;
+  isIgnoreWorkhour: boolean = false;
 }
