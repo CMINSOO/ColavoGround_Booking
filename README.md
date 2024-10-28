@@ -3,7 +3,7 @@
 **installation**
 
 ```
-$ git clone https://github.com/Helpme0723/back-end.git
+$ git clone https://github.com/CMINSOO/ColavoGround_Salon.git
 $ npm install
 ```
 
